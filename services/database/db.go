@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sync"
+	"time"
 )
 
 type DbService struct {
@@ -16,18 +18,33 @@ type Task struct {
 	Done bool
 }
 
+var (
+	dbPool   *sql.DB
+	poolOnce sync.Once
+)
+
 func InitDB() (*DbService, error) {
 	var err error
 
-	db, err := sql.Open("pgx", "postgres://postgres@localhost:15432/postgres?sslmode=disable")
-	if err != nil {
-		return nil, err
-	}
+	poolOnce.Do(func() {
+		dbPool, err = sql.Open("pgx", "postgres://postgres@localhost:15432/postgres?sslmode=disable")
+		if err != nil {
+			return
+		}
+		dbPool.SetMaxOpenConns(25)
+		dbPool.SetMaxIdleConns(25)
+		dbPool.SetConnMaxLifetime(5 * time.Minute)
 
-	if err = db.Ping(); err != nil {
+		if err = dbPool.Ping(); err != nil {
+			return
+		}
+	})
+
+	if err != nil {
+		poolOnce = sync.Once{}
 		return nil, err
 	}
-	return &DbService{db: db}, nil
+	return &DbService{db: dbPool}, nil
 }
 
 func (d *DbService) Close() error {
